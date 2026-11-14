@@ -1,9 +1,9 @@
-name: Build Windows EXE
+name: Build Windows EXE and Installer
 
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]          # a tag like v1.0 also creates a Release with the exe
+    tags: [ 'v*' ]          # a tag like v1.0 also creates a Release with the installer
   workflow_dispatch:        # lets you press "Run workflow" manually
 
 jobs:
@@ -22,13 +22,24 @@ jobs:
           pip install -r requirements.txt
       - name: Build exe
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name LabReportPro --icon logo.ico --hidden-import seed --hidden-import core --hidden-import reports --hidden-import branding app.py
-      - name: Save the exe
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build installer
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
+      - name: Save the installer
         uses: actions/upload-artifact@v4
         with:
-          name: LabReportPro-exe
+          name: LabReportPro-Installer
+          path: Output/LabReportPro_Setup.exe
+      - name: Save the portable exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: LabReportPro-portable-exe
           path: dist/LabReportPro.exe
       - name: Attach to Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/LabReportPro.exe
+          files: |
+            Output/LabReportPro_Setup.exe
+            dist/LabReportPro.exe
