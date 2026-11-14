@@ -80,3 +80,19 @@ VERSION 3 ADDITIONS
     Sheets. Settings -> "Choose logo file..." replaces it with a better-quality picture; options let you print it on Test Reports too.
  SECURITY NOTE: the program controls what people can do inside LabReport Pro. Also keep the LabData folder on a PC / shared folder that only authorised
  people can open (Windows folder permissions), and take backups (Settings -> Backup).
+
+FORGOT PASSWORD
+ * Analysts / other users: ask the Administrator -> Users & Permissions -> select the user -> "Reset password" (gives a temporary password).
+ * Administrator: when the Administrator account is created the program shows a RECOVERY CODE once - write it down and keep it safe.
+   On the login window click "Forgot password?", enter the user name, the recovery code and a new password. Each code works once and a new
+   code is shown after use. If your account was created before this feature, a code is created the next time you log in (or use
+   Users & Permissions -> "My recovery code (new)").
+ * The login window now sizes itself to the screen / Windows text scaling, so LOGIN, Exit and "Forgot password?" are always visible.
+
+INSTALLER (shows in Windows Settings -> Apps / Control Panel -> Programs, with Uninstall)
+ GitHub now builds TWO files: LabReportPro_Setup.exe (installer - use this) and LabReportPro.exe (portable, no install).
+ Run LabReportPro_Setup.exe -> Next -> Install. It adds a Start-menu entry (and optional desktop icon) and an entry in
+ Apps & features, from where you can uninstall. Uninstall asks whether to delete your data (default: keep it).
+ Installed version stores data in C:\ProgramData\LabReportPro\LabData (shared by all Windows users of the PC, survives upgrades/uninstall).
+ Upgrade: just run the new Setup over the old one. Moving old data: copy the old LabData folder's contents into the folder above.
+ Backup: copy that folder (or Settings -> Backup).

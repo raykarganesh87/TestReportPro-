@@ -969,6 +969,14 @@ class SettingsTab(ttk.Frame):
 
 
 # ======================================================================= Login / users / audit
+def center_auto(win):
+    """Size the window to its content (so no button is ever cut off, whatever the Windows text scaling) and centre it."""
+    win.update_idletasks()
+    w, h = max(win.winfo_reqwidth(), 360), win.winfo_reqheight() + 6
+    win.minsize(w, h)
+    win.geometry(f'+{max(0, (win.winfo_screenwidth() - w) // 2)}+{max(0, (win.winfo_screenheight() - h) // 3)}')
+
+
 def center(win, w, h):
     win.update_idletasks()
     win.geometry(f'{w}x{h}+{(win.winfo_screenwidth() - w) // 2}+{(win.winfo_screenheight() - h) // 3}')
@@ -978,24 +986,26 @@ class LoginDialog(tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app, self.db, self.ok = app, app.db, False
-        self.title(f'{APP} - Login'); self.resizable(False, False); center(self, 380, 330)
-        self.configure(bg='white')
+        self.title(f'{APP} - Login'); self.configure(bg='white')
         self._logo = branding.tk_photo(tk, 70)
-        tk.Label(self, image=self._logo, bg='white').pack(pady=(14, 2))
+        tk.Label(self, image=self._logo, bg='white').pack(pady=(14, 2), padx=30)
         tk.Label(self, text=APP, font=('', 15, 'bold'), bg='white', fg='#1F3864').pack()
         tk.Label(self, text=self.db.setting('lab_name'), bg='white', fg='#555').pack(pady=(0, 8))
-        f = tk.Frame(self, bg='white'); f.pack()
+        f = tk.Frame(self, bg='white'); f.pack(padx=20)
         self.u = tk.StringVar(); self.p = tk.StringVar()
         tk.Label(f, text='User name', bg='white').grid(row=0, column=0, sticky='e', padx=6, pady=4)
         e1 = ttk.Entry(f, textvariable=self.u, width=26); e1.grid(row=0, column=1)
         tk.Label(f, text='Password', bg='white').grid(row=1, column=0, sticky='e', padx=6, pady=4)
         e2 = ttk.Entry(f, textvariable=self.p, show='*', width=26); e2.grid(row=1, column=1)
-        self.msg = tk.Label(self, text='', fg='#C00000', bg='white', wraplength=340); self.msg.pack(pady=4)
-        b = tk.Frame(self, bg='white'); b.pack()
-        ttk.Button(b, text='Login', command=self.go).pack(side='left', padx=6); ttk.Button(b, text='Exit', command=self.cancel).pack(side='left', padx=6)
-        tk.Label(self, text='Software by Mr. Ganesh Raykar', fg='#888', bg='white', font=('', 8)).pack(side='bottom', pady=6)
+        self.msg = tk.Label(self, text='', fg='#C00000', bg='white', wraplength=330); self.msg.pack(pady=4)
+        b = tk.Frame(self, bg='white'); b.pack(pady=4)
+        ttk.Button(b, text='LOGIN', command=self.go, width=12).pack(side='left', padx=6)
+        ttk.Button(b, text='Exit', command=self.cancel, width=8).pack(side='left', padx=6)
+        fp = tk.Label(self, text='Forgot password?', fg='#0563C1', bg='white', cursor='hand2', font=('', 9, 'underline')); fp.pack(pady=(6, 2))
+        fp.bind('<Button-1>', lambda e: self.forgot())
+        tk.Label(self, text='Software by Mr. Ganesh Raykar', fg='#888', bg='white', font=('', 8)).pack(pady=(8, 10))
         self.bind('<Return>', lambda e: self.go()); self.protocol('WM_DELETE_WINDOW', self.cancel)
-        e1.focus_set(); self.lift(); self.attributes('-topmost', True); self.after(300, lambda: self.attributes('-topmost', False))
+        center_auto(self); e1.focus_set(); self.lift(); self.attributes('-topmost', True); self.after(300, lambda: self.attributes('-topmost', False))
         self.grab_set(); self.wait_window(self)
 
     def go(self):
@@ -1005,8 +1015,55 @@ class LoginDialog(tk.Toplevel):
         else:
             self.msg.config(text=m); self.p.set('')
 
+    def forgot(self):
+        ForgotPasswordDialog(self, self.db, self.u.get())
+
     def cancel(self):
         self.ok = False; self.destroy()
+
+
+def show_recovery_code(parent, code, first=False):
+    """Shows a recovery code once; the user must confirm that it has been saved."""
+    d = tk.Toplevel(parent); d.title('Recovery code'); d.resizable(False, False)
+    ttk.Label(d, text='Your RECOVERY CODE', font=('', 12, 'bold')).pack(padx=20, pady=(14, 4))
+    ttk.Label(d, wraplength=420, justify='left', foreground='#555', text='If you ever forget the Administrator password, this code lets you set a new one from the login window '
+              '("Forgot password?"). It is shown ONLY NOW. Write it down and keep it in a safe place (not on this PC). Each code works once; a new one is issued after use.').pack(padx=20)
+    e = ttk.Entry(d, width=26, font=('Courier', 14, 'bold'), justify='center'); e.insert(0, code); e.configure(state='readonly'); e.pack(pady=10)
+    def copy():
+        d.clipboard_clear(); d.clipboard_append(code); copy_b.config(text='Copied')
+    b = ttk.Frame(d); b.pack(pady=(0, 14)); copy_b = ttk.Button(b, text='Copy', command=copy); copy_b.pack(side='left', padx=6)
+    ttk.Button(b, text='I have saved it', command=d.destroy).pack(side='left', padx=6)
+    center_auto(d); d.attributes('-topmost', True); d.grab_set(); d.wait_window(d)
+
+
+class ForgotPasswordDialog(tk.Toplevel):
+    def __init__(self, parent, db, username=''):
+        super().__init__(parent)
+        self.db = db; self.title('Forgot password'); self.resizable(False, False)
+        ttk.Label(self, text='Forgot password?', font=('', 12, 'bold')).pack(padx=20, pady=(14, 4), anchor='w')
+        ttk.Label(self, wraplength=430, justify='left', foreground='#444', text='STAFF / ANALYSTS: ask your Administrator to reset it (Users & Permissions -> Reset password). '
+                  'You will then get a temporary password and choose your own at first login.').pack(padx=20, anchor='w')
+        ttk.Separator(self).pack(fill='x', padx=20, pady=8)
+        ttk.Label(self, wraplength=430, justify='left', text='ADMINISTRATOR: enter your user name, the Recovery Code given when the account was created, and a new password.').pack(padx=20, anchor='w')
+        f = ttk.Frame(self); f.pack(padx=20, pady=6)
+        self.v = {k: tk.StringVar() for k in ('user', 'code', 'pw', 'pw2')}; self.v['user'].set(username)
+        for i, (k, lab, show) in enumerate([('user', 'User name', ''), ('code', 'Recovery code', ''), ('pw', 'New password', '*'), ('pw2', 'Repeat new password', '*')]):
+            ttk.Label(f, text=lab).grid(row=i, column=0, sticky='e', padx=6, pady=3); ttk.Entry(f, textvariable=self.v[k], show=show, width=30).grid(row=i, column=1)
+        self.msg = ttk.Label(self, text='', foreground='#C00000', wraplength=430); self.msg.pack(padx=20, pady=2)
+        b = ttk.Frame(self); b.pack(pady=(4, 14)); ttk.Button(b, text='Reset password', command=self.go).pack(side='left', padx=6); ttk.Button(b, text='Close', command=self.destroy).pack(side='left')
+        center_auto(self); self.attributes('-topmost', True); self.grab_set(); self.wait_window(self)
+
+    def go(self):
+        v = {k: x.get() for k, x in self.v.items()}
+        if v['pw'] != v['pw2']:
+            self.msg.config(text='The two passwords do not match.'); return
+        try:
+            new_code = self.db.recover_password(v['user'], v['code'], v['pw'])
+        except ValueError as e:
+            self.msg.config(text=str(e)); return
+        messagebox.showinfo(APP, 'Password reset. You can log in now.', parent=self)
+        show_recovery_code(self, new_code)
+        self.destroy()
 
 
 class FirstRunDialog(tk.Toplevel):
@@ -1014,7 +1071,7 @@ class FirstRunDialog(tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.db, self.ok = app.db, False
-        self.title(f'{APP} - create Administrator'); self.resizable(False, False); center(self, 470, 360)
+        self.title(f'{APP} - create Administrator'); self.resizable(False, False)
         ttk.Label(self, text='Welcome! Create the Administrator account.', font=('', 12, 'bold')).pack(pady=(14, 2))
         ttk.Label(self, wraplength=420, foreground='#555', text='The Administrator creates the other users and decides what each user may view, add, edit or delete. '
                   'Remember this password - there is no default and no recovery without it.').pack(pady=4)
@@ -1025,7 +1082,7 @@ class FirstRunDialog(tk.Toplevel):
         ttk.Label(self, text='Password: at least 8 characters, letters and digits.', foreground='#777').pack()
         self.msg = ttk.Label(self, text='', foreground='#C00000'); self.msg.pack(pady=4)
         b = ttk.Frame(self); b.pack(); ttk.Button(b, text='Create Administrator', command=self.go).pack(side='left', padx=6); ttk.Button(b, text='Exit', command=self.destroy).pack(side='left')
-        self.protocol('WM_DELETE_WINDOW', self.destroy); self.attributes('-topmost', True); self.after(300, lambda: self.attributes('-topmost', False))
+        self.protocol('WM_DELETE_WINDOW', self.destroy); center_auto(self); self.attributes('-topmost', True); self.after(300, lambda: self.attributes('-topmost', False))
         self.grab_set(); self.wait_window(self)
 
     def go(self):
@@ -1035,17 +1092,20 @@ class FirstRunDialog(tk.Toplevel):
         if v['pw'] != v['pw2']:
             self.msg.config(text='The two passwords do not match.'); return
         try:
-            self.db.create_user(v['user'], v['name'], v['pw'], 'Administrator', {}, must_change=False)
+            code = self.db.create_user(v['user'], v['name'], v['pw'], 'Administrator', {}, must_change=False)
         except ValueError as e:
             self.msg.config(text=str(e)); return
-        self.ok = True; self.destroy()
+        self.ok = True
+        if code:
+            show_recovery_code(self, code, first=True)
+        self.destroy()
 
 
 class ChangePasswordDialog(tk.Toplevel):
     def __init__(self, parent, db, forced=False):
         super().__init__(parent)
         self.db, self.ok, self.forced = db, False, forced
-        self.title('Change password'); self.resizable(False, False); center(self, 420, 300)
+        self.title('Change password'); self.resizable(False, False)
         ttk.Label(self, text='You must set a new password before continuing.' if forced else 'Change your password', font=('', 11, 'bold')).pack(pady=(14, 6))
         f = ttk.Frame(self); f.pack()
         self.v = {k: tk.StringVar() for k in ('old', 'new', 'new2')}
@@ -1055,7 +1115,7 @@ class ChangePasswordDialog(tk.Toplevel):
         self.msg = ttk.Label(self, text='', foreground='#C00000', wraplength=380); self.msg.pack(pady=4)
         b = ttk.Frame(self); b.pack(); ttk.Button(b, text='Change password', command=self.go).pack(side='left', padx=6)
         ttk.Button(b, text='Cancel', command=self.destroy).pack(side='left')
-        self.attributes('-topmost', True); self.after(300, lambda: self.attributes('-topmost', False)); self.grab_set(); self.wait_window(self)
+        center_auto(self); self.attributes('-topmost', True); self.after(300, lambda: self.attributes('-topmost', False)); self.grab_set(); self.wait_window(self)
 
     def go(self):
         v = {k: x.get() for k, x in self.v.items()}
@@ -1131,7 +1191,9 @@ class UserDialog(Modal):
                 self.db.update_user(self.user['id'], self.name.get(), self.role.get(), perms, self.active.get())
             else:
                 if not self.name.get().strip(): raise ValueError('Enter the full name.')
-                self.db.create_user(self.un.get(), self.name.get(), self.pw.get(), self.role.get(), perms)
+                code = self.db.create_user(self.un.get(), self.name.get(), self.pw.get(), self.role.get(), perms)
+                if code:
+                    show_recovery_code(self, code)
         except (ValueError, PermissionError) as e:
             messagebox.showwarning(APP, str(e), parent=self); return
         self.saved = True; self.destroy()
@@ -1143,7 +1205,7 @@ class UsersTab(ttk.Frame):
         ttk.Label(self, foreground='#1F3864', wraplength=1100, text='Only the Administrator (or a user given the "Users" section) can add users and decide what each person may view, add, edit or delete. '
                   'Wrong password 5 times locks an account - unlock it here.').pack(side='top', anchor='w', padx=8, pady=6)
         bb = ttk.Frame(self); bb.pack(side='bottom', fill='x', padx=8, pady=6)
-        for t, c in [('Add user', self.add), ('Edit user / permissions', self.edit), ('Reset password', self.reset), ('Unlock account', self.unlock), ('Delete user', self.delete)]:
+        for t, c in [('Add user', self.add), ('Edit user / permissions', self.edit), ('Reset password', self.reset), ('Unlock account', self.unlock), ('Delete user', self.delete), ('My recovery code (new)', self.my_code)]:
             ttk.Button(bb, text=t, command=c).pack(side='left', padx=4)
         cols = [('user', 'User name', 120), ('name', 'Full name', 180), ('role', 'Role', 110), ('active', 'Active', 55), ('locked', 'Locked', 55),
                 ('last', 'Last login', 130), ('perm', 'Allocated sections', 520)]
@@ -1184,6 +1246,13 @@ class UsersTab(ttk.Frame):
     def unlock(self):
         u = self.sel()
         if u: self.db.unlock_user(u['id']); self.refresh()
+
+    def my_code(self):
+        try:
+            code = self.db.new_recovery_code()
+        except PermissionError as e:
+            messagebox.showwarning(APP, str(e)); return
+        show_recovery_code(self, code)
 
     def delete(self):
         u = self.sel()
@@ -1301,6 +1370,10 @@ class App(tk.Tk):
             if not ChangePasswordDialog(self, self.db, forced=True).ok:
                 self.db.logout(); return False
         self.build_ui(); self.deiconify(); self.lift()
+        u = self.db.user
+        if u['role'] == 'Administrator' and not self.test_login and not self.db.c.execute('SELECT recovery_hash FROM users WHERE id=?', (u['id'],)).fetchone()[0]:
+            messagebox.showinfo(APP, 'Your Administrator account has no recovery code yet.\nA code is created now - write it down. It lets you reset a forgotten password.', parent=self)
+            show_recovery_code(self, self.db.new_recovery_code())
         return True
 
     def logout(self):

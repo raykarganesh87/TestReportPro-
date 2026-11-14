@@ -9,7 +9,20 @@ def app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-DATA_DIR = os.path.join(app_dir(), 'LabData')
+def data_dir():
+    """Where the database lives.
+    - a 'LabData' folder beside the program (portable use / older versions) is used if it exists;
+    - the installed Windows version keeps data in C:\\ProgramData\\LabReportPro\\LabData (shared by all PC users, survives uninstall/upgrade)."""
+    legacy = os.path.join(app_dir(), 'LabData')
+    if os.path.isdir(legacy):
+        return legacy
+    pd = os.environ.get('PROGRAMDATA')
+    if getattr(sys, 'frozen', False) and sys.platform.startswith('win') and pd:
+        return os.path.join(pd, 'LabReportPro', 'LabData')
+    return legacy
+
+
+DATA_DIR = data_dir()
 DB_PATH = os.path.join(DATA_DIR, 'labdata.db')
 REPORT_DIR = os.path.join(DATA_DIR, 'Reports')
 BACKUP_DIR = os.path.join(DATA_DIR, 'Backups')
@@ -341,6 +354,10 @@ class DB:
         for col in ('conc', 'reagent'):                     # databases created by older versions
             if col not in cols:
                 self.c.execute(f'ALTER TABLE fields ADD COLUMN {col} TEXT')
+        ucols = {r[1] for r in self.c.execute('PRAGMA table_info(users)')}
+        for col in ('recovery_salt', 'recovery_hash'):
+            if col not in ucols:
+                self.c.execute(f'ALTER TABLE users ADD COLUMN {col} TEXT')
         for r in self.c.execute('SELECT id,label FROM fields WHERE conc IS NULL').fetchall():
             g = guess_conc(r['label'])
             self.c.execute('UPDATE fields SET conc=?, reagent=? WHERE id=?', (g, guess_reagent(r['label']) if g else '', r['id']))
@@ -447,6 +464,9 @@ class DB:
         self.c.commit()
         self.audit('users', 'create', username, [_chg('Role', '', role), _chg('Name', '', full_name),
                                                  _chg('Permissions', '', self.perm_text(perms, role))])
+        if role == 'Administrator':
+            return self._make_recovery(username)
+        return None
 
     @staticmethod
     def perm_text(perms, role=''):
@@ -497,6 +517,43 @@ class DB:
             raise ValueError('At least one active Administrator is required.')
         self.c.execute('DELETE FROM users WHERE id=?', (uid,)); self.c.commit()
         self.audit('users', 'delete', u['username'], [_chg('Role', u['role'], '')])
+
+    # ---- recovery code (for a forgotten Administrator password)
+    def _make_recovery(self, username):
+        raw = secrets.token_hex(8).upper()                      # 16 characters
+        code = '-'.join(raw[i:i + 4] for i in range(0, 16, 4))
+        salt, h = hash_pw(code.replace('-', ''))
+        self.c.execute('UPDATE users SET recovery_salt=?, recovery_hash=? WHERE lower(username)=lower(?)', (salt, h, username)); self.c.commit()
+        return code
+
+    def new_recovery_code(self):
+        """The logged-in Administrator creates a fresh recovery code for their own account (shown once)."""
+        u = self.user
+        if not u or u['role'] != 'Administrator':
+            raise PermissionError('Only an Administrator has a recovery code.')
+        code = self._make_recovery(u['username'])
+        self.audit('security', 'recovery code', u['username'], [_chg('Recovery code', '', 'new code generated')])
+        return code
+
+    def recover_password(self, username, code, new_pw):
+        """Forgot password: Administrator accounts can be reset with the recovery code. Returns the NEW recovery code."""
+        r = self.c.execute('SELECT * FROM users WHERE lower(username)=lower(?)', ((username or '').strip(),)).fetchone()
+        u = dict(r) if r else None
+        bad = 'User name or recovery code is not correct. (Only Administrator accounts have a recovery code - other users should ask the Administrator.)'
+        if not u or u['role'] != 'Administrator' or not u.get('recovery_hash'):
+            self.audit('security', 'recovery failed', username or '', [_chg('Reason', '', 'unknown user / no recovery code')], actor=username or 'unknown')
+            raise ValueError(bad)
+        _, h = hash_pw((code or '').replace('-', '').replace(' ', '').upper(), u['recovery_salt'])
+        if h != u['recovery_hash']:
+            self.audit('security', 'recovery failed', u['username'], [_chg('Reason', '', 'wrong recovery code')], actor=u['username'])
+            raise ValueError(bad)
+        msg = check_password_policy(new_pw)
+        if msg:
+            raise ValueError(msg)
+        salt, nh = hash_pw(new_pw)
+        self.c.execute('UPDATE users SET salt=?,pw_hash=?,must_change=0,failed=0,locked=0,active=1 WHERE id=?', (salt, nh, u['id'])); self.c.commit()
+        self.audit('security', 'password reset', u['username'], [_chg('Password', '', 'reset with recovery code')], actor=u['username'])
+        return self._make_recovery(u['username'])
 
     def login(self, username, password):
         r = self.c.execute('SELECT * FROM users WHERE lower(username)=lower(?)', ((username or '').strip(),)).fetchone()
