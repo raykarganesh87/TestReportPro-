@@ -21,7 +21,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Build exe
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name LabReportPro --icon logo.ico --hidden-import seed --hidden-import core --hidden-import reports --hidden-import branding app.py
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name LabReportPro --icon logo.ico --hidden-import seed --hidden-import core --hidden-import reports --hidden-import branding --hidden-import seed_lab app.py
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
       - name: Build installer
