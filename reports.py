@@ -60,7 +60,13 @@ def prepare(db, jid):
     job = db.job(jid)
     mat = db.material(job['material_id'])
     tests = db.tests(job['material_id'])
-    res = compute_job(tests, db.job_values(jid))
+    vals = db.job_values(jid)
+    res = compute_job(tests, vals)
+    ecode = {e['id']: f"{e['code']} {e['name']}" for e in db.equipment()}
+    eq = db.job_equipment(jid)
+    for t in tests:                                   # per-test meta shown on the observation sheet
+        t['_date'] = vals.get((t['id'], '_date'), ''); t['_analyst'] = vals.get((t['id'], '_analyst'), '')
+        t['_equip'] = '; '.join(ecode.get(i, '?') for i in eq.get(t['id'], []))
     return job, mat, tests, res
 
 
@@ -235,12 +241,18 @@ def observation_pdf(db, jid, path=None):
             bold = c['is_result']
             val = fmt(v, c['decimals'])
             rows.append([Paragraph(('<b>%s</b>' if bold else '%s') % esc(c['label']), S['n']),
-                         Paragraph(('<b>%s</b>' if bold else '%s') % esc(val + (' ' + tt['unit'] if bold and tt['unit'] and val else '')), S['c']),
+                         Paragraph(('<b>%s</b>' if bold else '%s') % esc(val + (' ' + tt['unit'] if bold and tt['unit'] not in ('', '--') and val else '')), S['c']),
                          Paragraph(esc(c['expr']), S['s'])])
         tbl = Table(rows, colWidths=[92 * mm, 36 * mm, 54 * mm], repeatRows=1)
         tbl.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.5, colors.grey), ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E7E6E6')),
                                  ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'), ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2)]))
-        story.append(KeepTogether([Paragraph(f"{esc(tt['name'])} ({esc(tt['method'])})", S['hd']), Spacer(1, 1 * mm), tbl, Spacer(1, 3 * mm)]))
+        meta = []
+        if tt['_date']: meta.append(f"Date of analysis: {esc(tt['_date'])}")
+        if tt['_analyst']: meta.append(f"Analysed by: {esc(tt['_analyst'])}")
+        if tt['_equip']: meta.append(f"Equipment used: {esc(tt['_equip'])}")
+        parts_ = [Paragraph(f"{esc(tt['name'])} ({esc(tt['method'])})", S['hd'])]
+        if meta: parts_.append(Paragraph('   |   '.join(meta), S['s']))
+        story.append(KeepTogether(parts_ + [Spacer(1, 1 * mm), tbl, Spacer(1, 3 * mm)]))
     sig = Table([[Paragraph(f"Date of analysis: {d_show(job['analysis_date'])}", S['n']), '', ''],
                  [Paragraph('<b>Analysed by:</b> ' + esc(job['analysed_by']), S['n']), '', Paragraph('<b>Verified by:</b> ' + esc(job['verified_by']), S['n'])]],
                 colWidths=[70 * mm, 40 * mm, 72 * mm], rowHeights=[8 * mm, 16 * mm])
@@ -418,6 +430,10 @@ def observation_xlsx(db, jid, path=None):
     for t in tests:
         rr = res[t['id']]
         ws.merge_cells(f'A{r}:C{r}'); ws[f'A{r}'] = f"{t['name']} ({t['method']})" if t['method'] else t['name']; ws[f'A{r}'].font = f(size=11, bold=True); r += 1
+        meta = ' | '.join(x for x in [f"Date of analysis: {t['_date']}" if t['_date'] else '', f"Analysed by: {t['_analyst']}" if t['_analyst'] else '',
+                                      f"Equipment used: {t['_equip']}" if t['_equip'] else ''] if x)
+        if meta:
+            ws.merge_cells(f'A{r}:C{r}'); ws[f'A{r}'] = meta; ws[f'A{r}'].font = f(size=9, color='666666'); r += 1
         for c, h in zip('ABC', ['Observation', 'Value', 'Calculation']):
             ws[f'{c}{r}'] = h; ws[f'{c}{r}'].font = f(bold=True); ws[f'{c}{r}'].fill = grey; ws[f'{c}{r}'].border = box
             ws[f'{c}{r}'].alignment = Al(horizontal='center')

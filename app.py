@@ -234,6 +234,27 @@ class JobEditor(tk.Toplevel):
             errs = [e2] if e2 else []
         self.date_lbl.config(text=('! ' + errs[0]) if errs else '')
 
+    def hint_ids(self, t):
+        hint = [h.strip().lower() for h in (t.get('equip_hint') or '').split(',') if h.strip()]
+        return [e['id'] for e in self.equip if any(h in (e['name'] + ' ' + e['code']).lower() for h in hint)]
+
+    def test_date_errors(self):
+        """Each test's own Date of analysis must be a valid date inside the test period (start .. completion)."""
+        d = self.date_values(); start, end = d[1], d[2]; out = []
+        for t in self.tests:
+            v = self.tvars.get((t['id'], '_date'))
+            txt = v.get().strip() if v else ''
+            if not txt:
+                continue
+            iso = d_store(txt)
+            if not core._iso(iso):
+                out.append(f"{t['name']}: date of analysis '{txt}' is not a valid date (dd-mm-yyyy)."); continue
+            if start and iso < start:
+                out.append(f"{t['name']}: date of analysis ({d_show(iso)}) is before the Test Start Date ({d_show(start)}).")
+            if end and iso > end:
+                out.append(f"{t['name']}: date of analysis ({d_show(iso)}) is after the Test Completion Date ({d_show(end)}).")
+        return out
+
     def collect_equipment(self):
         return {tid: [self.equip[i]['id'] for i in lb.curselection()] for tid, lb in self.eq_boxes.items()}
 
@@ -257,7 +278,13 @@ class JobEditor(tk.Toplevel):
             fr = ttk.Frame(self.nb); self.nb.add(fr, text=f" {t['code']} ")
             ttk.Label(fr, text=f"{t['name']}   ({t['method']})", font=('', 11, 'bold')).grid(row=0, column=0, columnspan=4, sticky='w', padx=8, pady=6)
             ui = {'auto': {}, 'calc': {}}
-            r = 1
+            dv_ = tk.StringVar(value=self.typed.get((t['id'], '_date'), '')); av_ = tk.StringVar(value=self.typed.get((t['id'], '_analyst'), ''))
+            self.tvars[(t['id'], '_date')] = dv_; self.tvars[(t['id'], '_analyst')] = av_
+            hf = ttk.Frame(fr); hf.grid(row=1, column=0, columnspan=4, sticky='w', padx=8, pady=(0, 6))
+            ttk.Label(hf, text='Date of analysis (dd-mm-yyyy)').pack(side='left'); ttk.Entry(hf, textvariable=dv_, width=12).pack(side='left', padx=6)
+            ttk.Label(hf, text='Analysed by').pack(side='left', padx=(12, 0))
+            ttk.Combobox(hf, textvariable=av_, values=lines(self.db.setting('analysts')), width=20).pack(side='left', padx=6)
+            r = 2
             for f in t['fields']:
                 v = tk.StringVar(value=self.typed.get((t['id'], f['key']), ''))
                 v.trace_add('write', lambda *a: self.recalc())
@@ -277,6 +304,8 @@ class JobEditor(tk.Toplevel):
                 ui['calc'][c['key']] = lb; r += 1
             ttk.Separator(fr).grid(row=r, column=0, columnspan=4, sticky='ew', pady=6); r += 1
             ttk.Label(fr, text='Equipment used (goes to the Logbook automatically with the test start date)', font=('', 9, 'bold')).grid(row=r, column=0, columnspan=3, sticky='w', padx=8); r += 1
+            if t.get('equip_hint'):
+                ttk.Label(fr, text='Equipment types on the observation sheet: ' + t['equip_hint'], foreground='#777').grid(row=r, column=0, columnspan=3, sticky='w', padx=8); r += 1
             if self.equip:
                 lbf = ttk.Frame(fr)
                 lb = tk.Listbox(lbf, selectmode='multiple', height=min(8, len(self.equip)), exportselection=False, width=70)
@@ -284,7 +313,7 @@ class JobEditor(tk.Toplevel):
                 lb.pack(side='left'); lbs.pack(side='left', fill='y')
                 for e in self.equip:
                     lb.insert('end', f"{e['code']}  -  {e['name']}")
-                chosen = self.job_eq.get(t['id'], t.get('equipment_ids', []))
+                chosen = self.job_eq.get(t['id']) or t.get('equipment_ids') or self.hint_ids(t)
                 for i, e in enumerate(self.equip):
                     if e['id'] in chosen:
                         lb.selection_set(i)
@@ -309,7 +338,7 @@ class JobEditor(tk.Toplevel):
                 ui['auto'][f['key']].config(text=f"auto = {fmt(r['inputs'][f['key']], 4).rstrip('0').rstrip('.')}" if r['auto'][f['key']] else '')
             for c in t['calcs']:
                 v = r['calcs'][c['key']]
-                ui['calc'][c['key']].config(text=(fmt(v, c['decimals']) + (' ' + t['unit'] if c['is_result'] and t['unit'] and v is not None else '')) if v is not None else '-')
+                ui['calc'][c['key']].config(text=(fmt(v, c['decimals']) + (' ' + t['unit'] if c['is_result'] and t['unit'] not in ('', '--') and v is not None else '')) if v is not None else '-')
         self.sum_tree.delete(*self.sum_tree.get_children())
         for t in self.tests:
             self.sum_tree.insert('', 'end', values=(t['name'] + ('' if t['in_report'] else '  (calc only)'),
@@ -334,9 +363,14 @@ class JobEditor(tk.Toplevel):
         if dup and dup[0] != self.jid:
             messagebox.showwarning(APP, f"Report No. '{data['report_no']}' already exists.", parent=self); return False
         errs = core.check_dates(data['receipt_date'], data['start_date'], data['end_date'], data['report_date'])
+        if not errs:
+            errs = self.test_date_errors()
         if errs:
             messagebox.showwarning(APP, 'Please correct the dates:\n\n' + '\n'.join('- ' + e for e in errs), parent=self); return False
         self.collect_typed()
+        for k in list(self.typed):
+            if k[1] == '_date' and str(self.typed[k]).strip():
+                self.typed[k] = d_show(d_store(self.typed[k]))          # always stored as dd-mm-yyyy
         try:
             self.jid = self.db.save_job(self.jid, data, {k: v for k, v in self.typed.items()}, equipment=self.collect_equipment())
         except (ValueError, PermissionError) as ex:
@@ -512,6 +546,9 @@ class TestDialog(Modal):
             ttk.Label(ef, text='No equipment yet.\nAdd it in the\n"Equipment & Logbook" tab.', foreground='#888').pack(padx=8, pady=8)
         self.rep = tk.BooleanVar(value=bool(self.t.get('in_report', 1)))
         ttk.Checkbutton(top, text='Show this test in the test report (untick = calculation-only step)', variable=self.rep).grid(row=4, column=0, columnspan=4, sticky='w', padx=6)
+        self.hint = tk.StringVar(value=self.t.get('equip_hint') or '')
+        ttk.Label(top, text='Equipment types on the observation sheet\n(e.g. Balance, Oven, Burette)').grid(row=5, column=0, sticky='w', padx=6, pady=2)
+        ttk.Entry(top, textvariable=self.hint, width=50).grid(row=5, column=1, columnspan=3, sticky='w', padx=4)
         f1 = ttk.LabelFrame(P, text=' Observation fields the analyst types '); f1.pack(side='top', fill='x', padx=8, pady=4)
         self.fe = ListEditor(f1, [('key', 'Variable', 70), ('label', 'Label', 300), ('unit', 'Unit', 45), ('kind', 'Type', 55), ('conc', 'N/M', 40), ('default_expr', 'Default formula', 120)], self.t['fields'], field_edit)
         self.fe.pack(fill='both', expand=True, padx=4, pady=4)
@@ -535,7 +572,7 @@ class TestDialog(Modal):
         if self.ce.rows and sum(1 for r in self.ce.rows if r['is_result']) != 1:
             raise ValueError('Tick exactly one calculation as the reported result.')
         t = dict(self.t); t.update(code=v['code'], name=v['name'], report_name=v['report_name'] or v['name'], method=v['method'], unit=v['unit'],
-                                  limit_text=v['limit_text'], decimals=int(v['decimals']), page=int(v['page']), in_report=1 if self.rep.get() else 0)
+                                  limit_text=v['limit_text'], decimals=int(v['decimals']), page=int(v['page']), in_report=1 if self.rep.get() else 0, equip_hint=self.hint.get().strip())
         t['fields'] = self.fe.rows; t['calcs'] = self.ce.rows
         t['equipment_ids'] = [self.equip[i]['id'] for i in self.eqb.curselection()] if self.eqb else self.t.get('equipment_ids', [])
         return t

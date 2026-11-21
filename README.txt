@@ -96,3 +96,12 @@ INSTALLER (shows in Windows Settings -> Apps / Control Panel -> Programs, with U
  Installed version stores data in C:\ProgramData\LabReportPro\LabData (shared by all Windows users of the PC, survives upgrades/uninstall).
  Upgrade: just run the new Setup over the old one. Moving old data: copy the old LabData folder's contents into the folder above.
  Backup: copy that folder (or Settings -> Backup).
+
+VERSION 4 - TESTS FROM "Observation_Sheet_Combine.xlsx" (added automatically once, at the first start after the update)
+ New materials in the Test Library (each sheet of your workbook): Ambient Air (PM10, PM2.5, SO2, NOx), Building Lime (9 tests), GGBS (cement tests),
+ Hardened Concrete (pH, Chloride, Acid Soluble Sulphate), Soil (14 tests incl. C:N ratio), Waste Water (39 tests), Drinking Water (28 tests incl. Odour, Taste panel,
+ Coliform, E. coli), Construction Water (9 tests). Admixture, Fly Ash, Cement/OPC/PPC and Aggregate sheets were already in the program.
+ Limits are blank (your observation sheets do not give them) - enter them in Test Library -> Edit test.
+ Every test tab now has its own "Date of analysis" and "Analysed by" (must lie between Test Start and Test Completion date); these print on the observation sheet.
+ "Equipment types on the observation sheet" (Balance, Oven, Burette ...) are stored per test: the matching equipment you registered is ticked automatically for the logbook.
+ Every Normality / Molarity in the new tests feeds the Chemical Standardization Record on the testing day of that test.

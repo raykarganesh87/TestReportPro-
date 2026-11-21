@@ -208,7 +208,7 @@ def guess_conc(label):
 def guess_reagent(label):
     m = re.search(r'\bof\s+(.*)$', label or '', re.I)
     r = (m.group(1) if m else label or '').strip()
-    r = re.sub(r'\s*\([^)]*\)\s*$', '', r)
+    r = re.sub(r'\s*\([^)]*\)', '', r)
     r = re.sub(r'^[\d.]+\s*[NM]\s+', '', r)
     return r.strip() or (label or '')
 
@@ -289,7 +289,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS materials(id INTEGER PRIMARY KEY, name TEXT UNIQUE, spec TEXT, page_titles TEXT, group_name TEXT);
 CREATE TABLE IF NOT EXISTS tests(id INTEGER PRIMARY KEY, material_id INTEGER, code TEXT, name TEXT, method TEXT, unit TEXT,
-  limit_text TEXT, decimals INTEGER, page INTEGER, in_report INTEGER, sort INTEGER, report_name TEXT);
+  limit_text TEXT, decimals INTEGER, page INTEGER, in_report INTEGER, sort INTEGER, report_name TEXT, equip_hint TEXT);
 CREATE TABLE IF NOT EXISTS fields(id INTEGER PRIMARY KEY, test_id INTEGER, key TEXT, label TEXT, unit TEXT, kind TEXT,
   default_expr TEXT, sort INTEGER);
 CREATE TABLE IF NOT EXISTS calcs(id INTEGER PRIMARY KEY, test_id INTEGER, key TEXT, label TEXT, expr TEXT, decimals INTEGER,
@@ -354,6 +354,9 @@ class DB:
         for col in ('conc', 'reagent'):                     # databases created by older versions
             if col not in cols:
                 self.c.execute(f'ALTER TABLE fields ADD COLUMN {col} TEXT')
+        tcols = {r[1] for r in self.c.execute('PRAGMA table_info(tests)')}
+        if 'equip_hint' not in tcols:
+            self.c.execute('ALTER TABLE tests ADD COLUMN equip_hint TEXT')
         ucols = {r[1] for r in self.c.execute('PRAGMA table_info(users)')}
         for col in ('recovery_salt', 'recovery_hash'):
             if col not in ucols:
@@ -368,6 +371,18 @@ class DB:
             from seed import seed_library
             with self.as_system(quiet=True):
                 seed_library(self)
+        self._add_lab_library()
+
+    def _add_lab_library(self):
+        """Adds the materials / tests from the lab's combined observation sheet - once per database (never re-adds what you delete)."""
+        if self.c.execute("SELECT value FROM settings WHERE key='lab_library_v1'").fetchone():
+            return
+        from seed_lab import seed_lab_library
+        with self.as_system(quiet=True):
+            added = seed_lab_library(self)
+        self.c.execute("INSERT OR REPLACE INTO settings VALUES('lab_library_v1','1')"); self.c.commit()
+        if added:
+            self.audit('library', 'create', 'Library update (observation sheets)', [_chg('Materials added', '', ', '.join(added))], actor='SYSTEM')
 
     # ---- permissions / audit infrastructure
     @contextlib.contextmanager
@@ -660,7 +675,7 @@ class DB:
 
     def _test_snapshot(self, t):
         snap = {'Code': t.get('code'), 'Name': t.get('name'), 'Report name': t.get('report_name'), 'Method': t.get('method'), 'Unit': t.get('unit'),
-                'Limit': t.get('limit_text'), 'Decimals': t.get('decimals'), 'Report page': t.get('page'), 'In report': 'Yes' if t.get('in_report') else 'No'}
+                'Limit': t.get('limit_text'), 'Equipment types': t.get('equip_hint') or '', 'Decimals': t.get('decimals'), 'Report page': t.get('page'), 'In report': 'Yes' if t.get('in_report') else 'No'}
         for f in t.get('fields', []):
             snap['Field ' + f['key']] = f"{f['label']} | unit {f.get('unit', '')} | {f.get('kind', 'number')} | default {f.get('default_expr', '')} | conc {f.get('conc') or ''} {f.get('reagent') or ''}"
         for c in t.get('calcs', []):
@@ -679,15 +694,15 @@ class DB:
             row = [x for x in self.tests(mid) if x['id'] == t['id']]
             old = self._test_snapshot(row[0]) if row else None
         if t.get('id'):
-            self.c.execute('UPDATE tests SET code=?,name=?,method=?,unit=?,limit_text=?,decimals=?,page=?,in_report=?,sort=?,report_name=? WHERE id=?',
+            self.c.execute('UPDATE tests SET code=?,name=?,method=?,unit=?,limit_text=?,decimals=?,page=?,in_report=?,sort=?,report_name=?,equip_hint=? WHERE id=?',
                            (t['code'], t['name'], t['method'], t['unit'], t['limit_text'], t['decimals'], t['page'],
-                            t['in_report'], t['sort'], t.get('report_name', ''), t['id']))
+                            t['in_report'], t['sort'], t.get('report_name', ''), t.get('equip_hint', ''), t['id']))
             tid = t['id']
             self.c.execute('DELETE FROM fields WHERE test_id=?', (tid,)); self.c.execute('DELETE FROM calcs WHERE test_id=?', (tid,))
         else:
-            cur = self.c.execute('INSERT INTO tests(material_id,code,name,method,unit,limit_text,decimals,page,in_report,sort,report_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+            cur = self.c.execute('INSERT INTO tests(material_id,code,name,method,unit,limit_text,decimals,page,in_report,sort,report_name,equip_hint) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                                  (mid, t['code'], t['name'], t['method'], t['unit'], t['limit_text'], t['decimals'], t['page'],
-                                  t['in_report'], t['sort'], t.get('report_name', '')))
+                                  t['in_report'], t['sort'], t.get('report_name', ''), t.get('equip_hint', '')))
             tid = cur.lastrowid
         for i, f in enumerate(t['fields']):
             conc = f.get('conc')
@@ -846,6 +861,8 @@ class DB:
                 for f in t['fields']:
                     labels[(t['id'], f['key'])] = f"{t['name']} - {f['label']}"
                 labels[('t', t['id'])] = t['name']
+                labels[(t['id'], '_date')] = f"{t['name']} - Date of analysis"
+                labels[(t['id'], '_analyst')] = f"{t['name']} - Analysed by"
         for k in sorted(set(oldvals) | set(newvals), key=lambda k: labels.get(k, str(k))):
             o, n = str(oldvals.get(k, '')).strip(), newvals.get(k, '')
             if o != n:
@@ -929,7 +946,7 @@ class DB:
             self.c.commit(); return
         vals = self.job_values(jid); chosen = self.job_equipment(jid)
         for t in self.tests(job['material_id'], full=False):
-            if not any(k[0] == t['id'] and str(v).strip() for k, v in vals.items()):
+            if not any(k[0] == t['id'] and not str(k[1]).startswith('_') and str(v).strip() for k, v in vals.items()):
                 continue                                              # test not done on this job
             for eid in chosen.get(t['id'], []):
                 self.c.execute('INSERT INTO logbook(log_date,equipment_id,job_id,test_id,report_no,job_no,test_name,analyst,remarks,auto) VALUES(?,?,?,?,?,?,?,?,?,1)',
@@ -969,6 +986,9 @@ class DB:
         if job and job['material_id']:
             vals = self.job_values(jid); day = self._job_day(job)
             for t in self.tests(job['material_id']):
+                tday = d_store(vals.get((t['id'], '_date'), '')) if vals.get((t['id'], '_date')) else day
+                if not _iso(tday):
+                    tday = day
                 for f in t['fields']:
                     if not f.get('conc'):
                         continue
@@ -977,13 +997,13 @@ class DB:
                         continue
                     reagent = (f.get('reagent') or guess_reagent(f['label'])).strip()
                     row = self.c.execute('SELECT id FROM std_records WHERE std_date=? AND lower(reagent)=lower(?) AND conc_type=? AND abs(value-?)<1e-9',
-                                         (day, reagent, f['conc'], v)).fetchone()
+                                         (tday, reagent, f['conc'], v)).fetchone()
                     if row:
                         sid = row[0]
                     else:
                         sid = self.c.execute('INSERT INTO std_records(std_date,reagent,conc_type,value,analyst,auto) VALUES(?,?,?,?,?,1)',
-                                             (day, reagent, f['conc'], v, job['analysed_by'] or job['assigned_to'] or '')).lastrowid
-                        self.quiet or self.audit('standard', 'auto-create', f"{d_show(day)} {reagent}", [_chg('Strength', '', v), _chg('From job', '', job['report_no'])])
+                                             (tday, reagent, f['conc'], v, vals.get((t['id'], '_analyst')) or job['analysed_by'] or job['assigned_to'] or '')).lastrowid
+                        self.quiet or self.audit('standard', 'auto-create', f"{d_show(tday)} {reagent}", [_chg('Strength', '', v), _chg('From job', '', job['report_no'])])
                     self.c.execute('INSERT OR IGNORE INTO std_links VALUES(?,?,?)', (sid, jid, t['id']))
         self._clean_std(); self.c.commit()
 
