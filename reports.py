@@ -309,7 +309,12 @@ def export_excel(db, path):
 
 # ======================================================================= Excel versions (same content as the PDFs)
 def _lines(text, width):
-    return sum(max(1, math.ceil(len(p) / max(1, width))) for p in str(text or '').split('\n'))
+    """Wrapped lines of a cell: assume only ~80% of the column width holds characters (Cambria is wider than '0')."""
+    w = max(1, int(width * 0.8))
+    return sum(max(1, math.ceil(len(p) / w)) for p in str(text or '').split('\n'))
+
+
+LINE_PT = 15.5
 
 
 def _xl_common():
@@ -362,7 +367,7 @@ def report_xlsx(db, jid, path=None):
             ws.merge_cells(f'A{r}:B{r}'); ws.merge_cells(f'C{r}:F{r}')
             ws[f'A{r}'] = lab; ws[f'A{r}'].font = f(bold=True); ws[f'A{r}'].alignment = Al(vertical='top', wrap_text=True)
             ws[f'C{r}'] = ':- ' + str(val or ''); ws[f'C{r}'].font = f(); ws[f'C{r}'].alignment = Al(vertical='top', wrap_text=True)
-            ws.row_dimensions[r].height = max(15, 13.5 * _lines(':- ' + str(val or ''), 80) + 3); r += 1
+            ws.row_dimensions[r].height = max(18, LINE_PT * _lines(':- ' + str(val or ''), 80) + 4); r += 1
         r += 1
         ws.merge_cells(f'A{r}:F{r}'); ws[f'A{r}'] = titles.get(str(pg), 'TEST ANALYSIS'); ws[f'A{r}'].font = f(size=11, bold=True)
         ws[f'A{r}'].alignment = Al(horizontal='center'); r += 1
@@ -383,13 +388,13 @@ def report_xlsx(db, jid, path=None):
                 cell.value = float(fmt(v, t['decimals'])); cell.number_format = '0.' + '0' * t['decimals'] if t['decimals'] else '0'
             else:
                 cell.value = fmt(v, t['decimals'])
-            ws.row_dimensions[r].height = max(20, 13.5 * max(_lines(vals[1], 38), _lines(t['limit_text'], 32), _lines(t['method'], 26)) + 6)
+            ws.row_dimensions[r].height = max(24, LINE_PT * max(_lines(vals[1], 40), _lines(t['limit_text'], 34), _lines(t['method'], 28)) + 8)
             r += 1
         r += 1
         ws[f'A{r}'] = 'Note :-'; ws[f'A{r}'].font = f(size=9, bold=True); r += 1
         for i, ln in enumerate([x for x in db.setting('notes').splitlines() if x.strip()], 1):
             ws.merge_cells(f'A{r}:F{r}'); ws[f'A{r}'] = f'{i}) {ln}'; ws[f'A{r}'].font = f(size=9); ws[f'A{r}'].alignment = Al(wrap_text=True, vertical='top')
-            ws.row_dimensions[r].height = max(13, 12 * _lines(ln, 105) + 2); r += 1
+            ws.row_dimensions[r].height = max(15, 13.5 * _lines(ln, 105) + 4); r += 1
         r += 1
         for txt, ht, bold in [(f"For {db.setting('lab_name')},", 18, True), ('', 40, False), ('Reviewed & Authorised by', 16, True), (job['reviewer'] or '', 16, True)]:
             ws.merge_cells(f'D{r}:F{r}'); ws[f'D{r}'] = txt; ws[f'D{r}'].font = f(bold=bold); ws[f'D{r}'].alignment = Al(horizontal='right')
@@ -424,7 +429,7 @@ def observation_xlsx(db, jid, path=None):
         ws[f'A{r}'] = a; ws.merge_cells(f'B{r}:C{r}'); ws[f'B{r}'] = b
         for c in 'ABC':
             ws[f'{c}{r}'].font = f(); ws[f'{c}{r}'].border = box; ws[f'{c}{r}'].alignment = Al(wrap_text=True, vertical='top')
-        ws.row_dimensions[r].height = max(16, 13.5 * max(_lines(a, 60), _lines(b, 70)) + 3); r += 1
+        ws.row_dimensions[r].height = max(20, LINE_PT * max(_lines(a, 62), _lines(b, 84)) + 5); r += 1
     r += 1
     grey = Fill('solid', fgColor='E7E6E6')
     for t in tests:
@@ -444,7 +449,7 @@ def observation_xlsx(db, jid, path=None):
             ws[f'C{r}'] = '(auto from earlier test)' if rr['auto'].get(fl['key']) else ''
             for c in 'ABC':
                 ws[f'{c}{r}'].font = f(); ws[f'{c}{r}'].border = box; ws[f'{c}{r}'].alignment = Al(wrap_text=True, vertical='center', horizontal='center' if c == 'B' else 'left')
-            ws.row_dimensions[r].height = max(15, 13.5 * _lines(ws[f'A{r}'].value, 58) + 2); r += 1
+            ws.row_dimensions[r].height = max(20, LINE_PT * max(_lines(ws[f'A{r}'].value, 62), _lines(ws[f'C{r}'].value, 52)) + 5); r += 1
         for c_ in t['calcs']:
             v = rr['calcs'].get(c_['key']); bold = bool(c_['is_result'])
             ws[f'A{r}'] = c_['label']; ws[f'C{r}'] = c_['expr']
@@ -455,7 +460,7 @@ def observation_xlsx(db, jid, path=None):
             for c in 'ABC':
                 ws[f'{c}{r}'].font = f(bold=bold, size=(9 if c == 'C' else 10), color=('666666' if c == 'C' else '000000'))
                 ws[f'{c}{r}'].border = box; ws[f'{c}{r}'].alignment = Al(wrap_text=True, vertical='center', horizontal='center' if c == 'B' else 'left')
-            ws.row_dimensions[r].height = max(15, 13.5 * max(_lines(c_['label'], 58), _lines(c_['expr'], 50)) + 2); r += 1
+            ws.row_dimensions[r].height = max(20, LINE_PT * max(_lines(c_['label'], 62), _lines(c_['expr'], 52)) + 5); r += 1
         r += 1
     ws[f'A{r}'] = f"Date of analysis: {d_show(job['analysis_date'])}"; ws[f'A{r}'].font = f(); r += 2
     ws[f'A{r}'] = 'Analysed by: ' + (job['analysed_by'] or ''); ws[f'C{r}'] = 'Verified by: ' + (job['verified_by'] or '')

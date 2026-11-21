@@ -1381,6 +1381,10 @@ class App(tk.Tk):
         st = ttk.Style(self)
         try: st.theme_use('vista' if sys.platform.startswith('win') else 'clam')
         except tk.TclError: pass
+        import tkinter.font as tkfont
+        lh = tkfont.nametofont('TkDefaultFont').metrics('linespace')           # row height follows the real font / Windows text scaling
+        st.configure('Treeview', rowheight=max(24, lh + 10))
+        st.configure('Treeview.Heading', padding=(4, 4))
         install_wheel(self)
         self._icon = branding.tk_photo(tk, 64)
         try: self.iconphoto(True, self._icon)
