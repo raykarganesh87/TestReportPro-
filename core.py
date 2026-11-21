@@ -331,7 +331,7 @@ DEFAULT_SETTINGS = {
     'credit_on_reports': '0',
     'logo_on_obs': '1',
     'logo_on_reports': '0',
-    'reviewers': 'Vitthal Nerkar\nOnkar Kukkar',
+    'reviewers': 'Vitthal Nerkar\nGanesh Raykar',
     'analysts': 'Rahul',
     'notes': ('The reported results are related to the sample provided by the client & valid at environment condition in which test performed.\n'
               'Report shall not be reproduced except in full without prior written Permission of Civil Tech.\n'
